@@ -1,6 +1,6 @@
 sbtPlugin := true
 
-organization := "com.github.stonexx.sbt"
+organization := "com.github.mgilbertnz.sbt"
 
 name := "sbt-webpack"
 

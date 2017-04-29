@@ -34,30 +34,7 @@ object SbtWebpack extends AutoPlugin {
     object WebpackKeys {
       val config       : SettingKey[File]                   = SettingKey[File]("webpackConfig", "The location of a webpack configuration file.")
       val envVars      : SettingKey[Map[String, String]]    = SettingKey[Map[String, String]]("webpackEnvVars", "Environment variable names and values to set for webpack.")
-      val watcherRunner: AttributeKey[WebpackWatcherRunner] = AttributeKey[WebpackWatcherRunner]("webpackWatcherRunner")
     }
-
-    trait WebpackWatcher {
-      def start(): Unit
-      def stop(): Unit
-    }
-
-    class WebpackWatcherRunner {
-      private var currentSubject: Option[WebpackWatcher] = None
-
-      def start(subject: WebpackWatcher): Unit = {
-        stop()
-        subject.start()
-        currentSubject = Some(subject)
-      }
-
-      def stop(): Unit = {
-        currentSubject.foreach(_.stop())
-        currentSubject = None
-      }
-    }
-
-    implicit def stateToWebpackWatcherRunner(s: State): WebpackWatcherRunner = s.get(WebpackKeys.watcherRunner).get
   }
 
   import autoImport._
@@ -96,9 +73,7 @@ object SbtWebpack extends AutoPlugin {
       val arg = (EOF | Seq(
         "dev",
         "prod",
-        "test",
-        "watch",
-        "stop"
+        "test"
       ).map(t => Space ~ token(t)).reduce(_ | _).map(_._2)).parsed
 
       val cacheDir = streams.value.cacheDirectory
@@ -107,18 +82,8 @@ object SbtWebpack extends AutoPlugin {
         case "dev" => Def.taskDyn(runWebpack(cacheDir, WebpackModes.Dev).dependsOn(webpackDependTasks: _*))
         case "prod" | () => Def.taskDyn(runWebpack(cacheDir, WebpackModes.Prod).dependsOn(webpackDependTasks: _*))
         case "test" => Def.taskDyn(runWebpack(cacheDir, WebpackModes.Test).dependsOn(webpackDependTasks: _*))
-        case "watch" => Def.taskDyn(webpackWatchStart(cacheDir).dependsOn(webpackDependTasks: _*))
-        case "stop" => Def.taskDyn(webpackWatchStop)
       }
-    }.evaluated,
-
-    onLoad in Global := (onLoad in Global).value.andThen { state =>
-      state.put(watcherRunner, new WebpackWatcherRunner)
-    },
-    onUnload in Global := (onUnload in Global).value.andThen { state =>
-      state.stop()
-      state.remove(watcherRunner)
-    }
+    }.evaluated
   )
 
   case class NodeMissingException(cause: Throwable) extends RuntimeException("'node' is required. Please install it and add it to your PATH.", cause)
@@ -162,41 +127,7 @@ object SbtWebpack extends AutoPlugin {
     }
   }
 
-  private def webpackWatchStart(cacheDir: File): Def.Initialize[Task[Unit]] = Def.task {
-    state.value.start(new WebpackWatcher {
-      private[this] var process: Option[Process] = None
-
-      def start(): Unit = {
-        state.value.log.info(s"Starting webpack watcher by ${relativizedPath(baseDirectory.value, (config in (WebpackModes.Dev, webpack)).value)}")
-
-        IO.delete(cacheDir / "run")
-
-        process = Some(forkNode(
-          baseDirectory.value,
-          getWebpackScript(cacheDir).value,
-          List(
-            (config in (WebpackModes.Dev, webpack)).value.absolutePath,
-            URLEncoder.encode(JsObject("watch" -> JsBoolean(true)).toString, UTF_8)
-          ),
-          (envVars in (WebpackModes.Dev, webpack)).value,
-          state.value.log
-        ))
-      }
-
-      def stop(): Unit = {
-        state.value.log.info(s"Stopping webpack watcher by ${relativizedPath(baseDirectory.value, (config in (WebpackModes.Dev, webpack)).value)}")
-
-        process.foreach(_.destroy())
-        process = None
-      }
-    })
-  }
-
-  private def webpackWatchStop: Def.Initialize[Task[Unit]] = Def.task(state.value.stop())
-
   private def runWebpack(cacheDir: File, mode: Configuration): Def.Initialize[Task[Unit]] = Def.task {
-    state.value.get(watcherRunner).foreach(_.stop())
-
     Seq(
       WebpackModes.Dev,
       WebpackModes.Prod,
@@ -248,13 +179,6 @@ object SbtWebpack extends AutoPlugin {
     }
     resultBuffer.result()
   }
-
-  private def forkNode(base: File, script: File, args: List[String], env: Map[String, String], log: Logger): Process =
-    try {
-      fork("node" :: script.absolutePath :: args, base, env, log.info(_), log.error(_), _ => ())
-    } catch {
-      case e: IOException => throw NodeMissingException(e)
-    }
 
   private val ResultEscapeChar: Char = 0x10
 
