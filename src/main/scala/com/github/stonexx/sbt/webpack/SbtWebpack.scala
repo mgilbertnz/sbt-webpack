@@ -111,7 +111,7 @@ object SbtWebpack extends AutoPlugin {
       state.value.log
     )
     import DefaultJsonProtocol._
-    results.headOption.toList.flatMap(_.convertTo[Seq[String]]).map(path => baseDirectory.value / path)
+    results.headOption.toList.flatMap(_.convertTo[Seq[String]]).map(path => new File(path))
   }
 
   private def relativizedPath(base: File, file: File): String =
